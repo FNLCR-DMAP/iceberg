@@ -79,6 +79,38 @@ class IcebergETLDemo:
             "✅ Created / confirmed Iceberg catalog + database: "
             f"{self.catalog_name}.etl_demo"
         )
+
+    def reset_pipeline_tables(self):
+        """Drop existing demo tables and branches so the script is idempotent.
+
+        Safe to run even if objects don't exist. Ensures that repeated
+        executions start from a clean slate without manual cleanup.
+        """
+        print(
+            "\n♻️  Resetting any existing demo tables/branches "
+            "(idempotent)..."
+        )
+        raw = f"{self.catalog_name}.etl_demo.raw_transactions"
+        intermediate = (
+            f"{self.catalog_name}.etl_demo.intermediate_transactions"
+        )
+        final = f"{self.catalog_name}.etl_demo.final_metrics"
+        # Drop branches if they exist (Iceberg 1.10 supports DROP BRANCH)
+        for branch in ["staging", "dev"]:
+            try:
+                self.spark.sql(
+                    f"ALTER TABLE {raw} DROP BRANCH {branch}"
+                )
+                print(f"  - Dropped branch '{branch}'")
+            except Exception:
+                pass  # Ignore if branch doesn't exist
+        for tbl in [final, intermediate, raw]:
+            try:
+                self.spark.sql(f"DROP TABLE IF EXISTS {tbl}")
+                print(f"  - Dropped table if existed: {tbl}")
+            except Exception as e:
+                print(f"  - Warning: could not drop {tbl}: {e}")
+        print("✅ Reset complete")
         
     def cleanup(self):
         """Clean up resources"""
@@ -118,7 +150,8 @@ class IcebergETLDemo:
         print("🔄 Creating raw data table...")
         df = self.generate_sample_data(500)
         table_name = f"{self.catalog_name}.etl_demo.raw_transactions"
-        df.writeTo(table_name).using("iceberg").create()
+        # createOrReplace keeps reruns idempotent
+        df.writeTo(table_name).using("iceberg").createOrReplace()
         self.raw_table = table_name
         print(f"✅ Created raw_transactions table with {df.count()} records")
         return df
@@ -139,7 +172,7 @@ class IcebergETLDemo:
                   )
         )
         table_name = f"{self.catalog_name}.etl_demo.intermediate_transactions"
-        intermediate_df.writeTo(table_name).using("iceberg").create()
+        intermediate_df.writeTo(table_name).using("iceberg").createOrReplace()
         self.intermediate_table = table_name
         print(
             "✅ Created intermediate_transactions table with "
@@ -162,7 +195,7 @@ class IcebergETLDemo:
             .withColumn("aggregated_at", current_timestamp())
         )
         table_name = f"{self.catalog_name}.etl_demo.final_metrics"
-        final_df.writeTo(table_name).using("iceberg").create()
+        final_df.writeTo(table_name).using("iceberg").createOrReplace()
         self.final_table = table_name
         print(f"✅ Created final_metrics table with {final_df.count()} records")
         return final_df
@@ -257,6 +290,74 @@ class IcebergETLDemo:
             .withColumnRenamed("count", "transaction_count")
             .orderBy("transaction_count", ascending=False)
             .show()
+        )
+    
+    def demonstrate_time_travel_sql(self):
+        """Show SQL time travel using VERSION AS OF and TIMESTAMP AS OF.
+
+        This supplements the snapshot-id reader example with pure SQL
+        syntax so users can see both approaches side-by-side.
+        """
+        print("\n🕰️  DEMONSTRATING TIME TRAVEL (SQL Syntax)")
+        print("=" * 50)
+        try:
+            snapshots_df = self.spark.sql(
+                f"""
+                SELECT snapshot_id, committed_at
+                FROM {self.raw_table}.snapshots
+                ORDER BY committed_at
+                """
+            )
+            rows = snapshots_df.collect()
+        except Exception as e:
+            print(f"⚠️ Could not read snapshots metadata: {e}")
+            return
+
+        if len(rows) < 1:
+            print("⚠️ No snapshots available yet.")
+            return
+
+        # Use the earliest snapshot for a deterministic example.
+        first_id = rows[0].snapshot_id
+        first_ts = rows[0].committed_at  # Python datetime
+
+        # Format timestamp to millisecond precision for Spark SQL literal.
+        # Spark accepts TIMESTAMP 'yyyy-MM-dd HH:mm:ss.SSS'
+        ts_literal = first_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        print(
+            f"First snapshot id: {first_id}\n"
+            f"Committed at: {first_ts} (-> {ts_literal})"
+        )
+        print("\n📊 Products (VERSION AS OF <snapshot_id>):")
+        try:
+            self.spark.sql(
+                f"""
+                SELECT product, COUNT(*) AS transaction_count
+                FROM {self.raw_table} VERSION AS OF {first_id}
+                GROUP BY product
+                ORDER BY transaction_count DESC
+                """
+            ).show()
+        except Exception as e:
+            print(f"⚠️ VERSION AS OF query failed: {e}")
+
+        print("\n📊 Products (TIMESTAMP AS OF <timestamp>):")
+        try:
+            self.spark.sql(
+                f"""
+                SELECT product, COUNT(*) AS transaction_count
+                FROM {self.raw_table} TIMESTAMP AS OF TIMESTAMP '{ts_literal}'
+                GROUP BY product
+                ORDER BY transaction_count DESC
+                """
+            ).show()
+        except Exception as e:
+            print(f"⚠️ TIMESTAMP AS OF query failed: {e}")
+        
+        print(
+            "\nℹ️  Both queries should produce identical counts "
+            "(same snapshot)."
         )
     
     def demonstrate_branching(self):
@@ -471,6 +572,7 @@ def main():
         
         # Demonstrate key features
         demo.demonstrate_time_travel()
+        demo.demonstrate_time_travel_sql()
         demo.demonstrate_branching()
         demo.demonstrate_schema_evolution()
         demo.show_metadata_and_lineage()
@@ -491,8 +593,8 @@ def main():
     finally:
         # Cleanup
         print("\n🧹 Cleaning up...")
-        demo.cleanup()
-        print("✅ Cleanup completed")
+        # demo.cleanup()
+        # print("✅ Cleanup completed")
  
 
 if __name__ == "__main__":

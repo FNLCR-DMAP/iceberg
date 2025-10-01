@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual envs
+.venv/
+venv/
+
+# Spark / Iceberg generated data
+warehouse/
+iceberg_warehouse/
+iceberg_warehouse_minimal/
+spark-warehouse/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS noise
+.DS_Store

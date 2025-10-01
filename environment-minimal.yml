@@ -1,0 +1,15 @@
+name: iceberg-demo
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pyspark=3.4.1
+  - pandas=2.0.3
+  - jupyter
+  - notebook
+  - openjdk=11
+  - pip
+  - pip:
+      - pyiceberg==0.5.1
+      # py4j comes with pyspark; explicit pin not required

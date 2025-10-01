@@ -1,0 +1,4 @@
+pyspark==3.4.1
+pyiceberg==0.5.1
+pandas==2.0.3
+jupyter==1.0.0
