@@ -1,0 +1,28 @@
+# Ignore Python cache / build artifacts
+__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+*.pytest_cache
+*.mypy_cache
+.build
+.dist
+.eggs
+
+# VCS
+.git
+.gitignore
+
+# Virtual envs
+.venv
+env/
+venv/
+
+# Local notebooks outputs
+.ipynb_checkpoints
+
+# Data warehouse (use volume instead)
+iceberg_warehouse
+
+# OS files
+.DS_Store

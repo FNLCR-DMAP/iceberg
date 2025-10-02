@@ -32,16 +32,7 @@ class IcebergETLDemo:
         
     def _create_spark_session(self):
         """Create Spark session configured for Iceberg only."""
-        jar_path = os.path.join(
-            os.getcwd(),
-            "jars",
-            "iceberg-spark-runtime-3.5_2.13-1.10.0.jar",
-        )
-        if not os.path.exists(jar_path):
-            raise FileNotFoundError(
-                "Required Iceberg runtime JAR not found at "
-                f"{jar_path}. Place the Iceberg Spark runtime jar in jars/."
-            )
+        jar_path = self._resolve_iceberg_jar()
 
         builder = (
             SparkSession.builder.appName("IcebergETLDemo")
@@ -66,8 +57,79 @@ class IcebergETLDemo:
                 self.warehouse_path,
             )
         )
-        print(f"✅ Using Iceberg JAR (Spark3.5 / Scala2.13): {jar_path}")
+        # Derive versions for logging (best effort)
+        jar_file = os.path.basename(jar_path)
+        spark_minor = scala_bin = iceberg_ver = "?"
+    # Expected pattern:
+    # iceberg-spark-runtime-<sparkMinor>_<scala>-<iceberg>.jar
+        try:
+            core = jar_file.replace(
+                "iceberg-spark-runtime-", ""
+            ).rstrip(".jar")
+            left, iceberg_ver = core.rsplit('-', 1)
+            spark_minor, scala_bin = left.split('_', 1)
+        except Exception:  # pragma: no cover - best effort only
+            pass
+        print(
+            "✅ Using Iceberg JAR (Spark "
+            f"{spark_minor} / Scala {scala_bin} / Iceberg {iceberg_ver}): "
+            f"{jar_path}"
+        )
         return builder.getOrCreate()
+
+    def _resolve_iceberg_jar(self) -> str:
+        """Resolve the Iceberg Spark runtime JAR to use.
+
+        Resolution order:
+        1. Environment variable ICEBERG_JAR (absolute or relative path)
+        2. A jar in ./jars that matches current PySpark minor version
+        3. Fallback to the lexicographically last iceberg-spark-runtime-* jar
+        """
+        env_path = os.getenv("ICEBERG_JAR")
+        if env_path and os.path.exists(env_path):
+            print(f"ℹ️  Using ICEBERG_JAR from environment: {env_path}")
+            return env_path
+
+        jars_dir = os.path.join(os.getcwd(), "jars")
+        if not os.path.isdir(jars_dir):
+            raise FileNotFoundError(
+                "jars/ directory not found. Run "
+                "scripts/download_iceberg_jars.py first."
+            )
+
+        try:
+            import pyspark  # local import to avoid early import errors
+            spark_minor = ".".join(pyspark.__version__.split(".")[:2])
+        except Exception:
+            spark_minor = None
+
+        candidates = []
+        for name in os.listdir(jars_dir):
+            if (
+                name.startswith("iceberg-spark-runtime-")
+                and name.endswith(".jar")
+            ):
+                candidates.append(name)
+
+        if not candidates:
+            raise FileNotFoundError(
+                "No iceberg-spark-runtime-*.jar found in jars/. "
+                "Run scripts/download_iceberg_jars.py to fetch one."
+            )
+
+        # Prefer matching current PySpark minor version if available
+        if spark_minor:
+            for name in sorted(candidates):
+                if f"iceberg-spark-runtime-{spark_minor}_" in name:
+                    return os.path.join(jars_dir, name)
+
+        # Fallback: pick latest (lexicographically last) jar
+        selected = sorted(candidates)[-1]
+        print(
+            "⚠️  No jar matched current PySpark minor; falling back to: "
+            f"{selected}"
+        )
+        return os.path.join(jars_dir, selected)
     
     def _setup_catalog(self):
         """Setup Iceberg catalog (required)."""

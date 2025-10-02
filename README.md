@@ -52,3 +52,35 @@ rm -rf iceberg_warehouse *.pyc .venv
 ```
 
 Enjoy exploring Iceberg! If something breaks, open an issue with your Spark + PySpark + Scala + Iceberg versions.
+
+## Docker Usage
+
+Build the image:
+```bash
+docker build -t iceberg-demo .
+```
+
+Run the demo (warehouse persisted to a host directory):
+```bash
+docker run --rm -v "$PWD/iceberg_warehouse:/app/iceberg_warehouse" \
+	--name iceberg-etl iceberg-demo
+```
+
+Override command (e.g., open a shell):
+```bash
+docker run --rm -it iceberg-demo bash
+```
+
+Use a custom Iceberg runtime jar (mount + env var):
+```bash
+docker run --rm -v "$PWD/custom_jars:/jars_custom" \
+	-e ICEBERG_JAR=/jars_custom/iceberg-spark-runtime-3.5_2.13-1.10.0.jar \
+	iceberg-demo
+```
+
+Rebuild after dependency/version changes:
+```bash
+docker build --no-cache -t iceberg-demo .
+```
+
+The container runs `python etl_pipeline_demo.py` by default.
