@@ -84,3 +84,60 @@ docker build --no-cache -t iceberg-demo .
 ```
 
 The container runs `python etl_pipeline_demo.py` by default.
+
+## Makefile & CI Helpers
+
+A `Makefile` is included for convenience (all targets are thin wrappers around Docker commands):
+
+| Target | Command Performed | Notes |
+|--------|-------------------|-------|
+| `make build` | `docker build -t iceberg-demo .` | Accepts `PYTHON_VERSION` & `IMAGE` overrides |
+| `make run` | Run container and persist warehouse volume | Uses `./iceberg_warehouse` on host |
+| `make shell` | Open interactive bash shell | Good for ad‑hoc Spark SQL |
+| `make warehouse` | Recreate (clean) local `iceberg_warehouse/` dir | Does not touch image |
+| `make clean` | Remove local image `iceberg-demo` | Ignores errors if missing |
+
+Examples:
+```bash
+# Build with a different Python base (example: 3.10-slim)
+make build PYTHON_VERSION=3.10-slim IMAGE=iceberg-demo:py310
+
+# Run the ETL and persist data
+make run
+
+# Interactive exploration
+make shell
+
+# Reset the local warehouse (start fresh)
+make warehouse
+```
+
+You can also override the image name when running:
+```bash
+IMAGE=my-registry/iceberg-demo:latest make build
+```
+
+### Multi-Arch (Optional)
+If you need a multi-architecture build (e.g., for both `amd64` and `arm64`):
+```bash
+docker buildx create --use --name iceberg-builder || true
+docker buildx build --platform linux/amd64,linux/arm64 \
+	-t my-org/iceberg-demo:latest --push .
+```
+
+### CI Workflow
+The GitHub Actions workflow at `.github/workflows/docker-ci.yml`:
+1. Sets up Buildx & QEMU
+2. Builds the image (local load only, not pushing)
+3. Runs a tiny smoke check (imports PySpark, starts the demo and truncates output)
+
+If you later want to push to a registry, add a login step (e.g., `docker/login-action`) and set `push: true` plus tags.
+
+### Upgrading Components
+For a PySpark + Iceberg upgrade:
+1. Update `pyspark` in `requirements.txt`
+2. Rebuild (`make build`)
+3. Verify the new Iceberg runtime JAR auto-download; if not, adjust `scripts/download_iceberg_jars.py`
+4. Run `make run` and validate snapshots & features
+
+Open an issue if you want an automated matrix (Spark/Iceberg) CI workflow; it's easy to extend from the current single-job file.
